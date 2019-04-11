@@ -7,8 +7,9 @@ use log::info;
 
 use crate::error::{Error, ErrorKind};
 use crate::module::{ModuleRuntime, ModuleRuntimeErrorReason};
-use crate::authorization::{Policy, AuthId};
+use crate::authorization::{Policy};
 use std::{fmt, cmp};
+use crate::pid::Pid;
 
 pub struct Authorization<M> {
     runtime: M,
@@ -98,8 +99,7 @@ where
     }
 }
 
-// todo make runtime specific
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum AuthId {
     None,
     Any,
@@ -108,7 +108,7 @@ pub enum AuthId {
 
 impl fmt::Display for AuthId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
+        match self {
             AuthId::None => write!(f, "none"),
             AuthId::Any => write!(f, "any"),
             AuthId::Value(pid) => write!(f, "{}", pid),
@@ -121,13 +121,13 @@ impl fmt::Display for AuthId {
 /// precedence, so Any is not equal to None.
 impl cmp::PartialEq for AuthId {
     fn eq(&self, other: &AuthId) -> bool {
-        match *self {
+        match self {
             AuthId::None => false,
             AuthId::Any => match *other {
                 AuthId::None => false,
                 _ => true,
             },
-            AuthId::Value(pid1) => match *other {
+            AuthId::Value(pid1) => match other {
                 AuthId::None => false,
                 AuthId::Any => true,
                 AuthId::Value(pid2) => pid1 == pid2,
@@ -138,13 +138,13 @@ impl cmp::PartialEq for AuthId {
 
 impl cmp::PartialEq<Pid> for AuthId {
     fn eq(&self, other: &Pid) -> bool {
-        match *self {
+        match self {
             AuthId::None => false,
-            AuthId::Any => match *other {
+            AuthId::Any => match other {
                 Pid::None => false,
                 _ => true,
             },
-            AuthId::Value(pid1) => match *other {
+            AuthId::Value(pid1) => match other {
                 Pid::None => false,
                 Pid::Any => true,
                 Pid::Value(pid2) => pid1 == pid2,

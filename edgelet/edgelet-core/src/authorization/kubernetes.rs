@@ -63,7 +63,6 @@ impl<M> Authorization<M>
     }
 }
 
-// todo make runtime specific
 #[derive(Clone, Debug)]
 pub enum AuthId {
     None,
