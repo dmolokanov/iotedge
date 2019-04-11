@@ -8,13 +8,7 @@ use log::info;
 use crate::error::{Error, ErrorKind};
 use crate::module::{ModuleRuntime, ModuleRuntimeErrorReason};
 use crate::pid::Pid;
-
-#[derive(Debug)]
-pub enum Policy {
-    Anonymous,
-    Caller,
-    Module(&'static str),
-}
+use crate::authorization::Policy;
 
 pub struct Authorization<M> {
     runtime: M,

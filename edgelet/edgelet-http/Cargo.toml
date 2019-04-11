@@ -54,3 +54,7 @@ edgelet-test-utils = { path = "../edgelet-test-utils" }
 
 [target.'cfg(windows)'.dev-dependencies]
 rand = "0.4"
+
+[features]
+runtime-docker = [] #["edgelet-core/runtime-docker"]
+runtime-kubernetes = [] #["edgelet-core/runtime-kubernetes"]

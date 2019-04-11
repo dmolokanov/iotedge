@@ -6,6 +6,9 @@ use failure::ResultExt;
 use futures::{future, Future};
 use hyper::{Body, Request, Response};
 
+#[cfg(feature = "runtime-kubernetes")]
+use hyper::header;
+
 use edgelet_core::pid::Pid;
 use edgelet_core::{Authorization as CoreAuth, ModuleRuntime, ModuleRuntimeErrorReason, Policy};
 
@@ -13,16 +16,19 @@ use crate::error::{Error, ErrorKind};
 use crate::route::{Handler, Parameters};
 use crate::IntoResponse;
 
-pub struct Authorization<H, M> {
+pub struct Authorization<H, M> where
+    H: Handler<Parameters>,
+    M: 'static + ModuleRuntime,
+{
     auth: CoreAuth<M>,
     inner: Arc<H>,
 }
 
 impl<H, M> Authorization<H, M>
-where
-    H: Handler<Parameters>,
-    M: 'static + ModuleRuntime,
-    for<'r> &'r <M as ModuleRuntime>::Error: Into<ModuleRuntimeErrorReason>,
+    where
+        H: Handler<Parameters>,
+        M: 'static + ModuleRuntime,
+        for<'r> &'r <M as ModuleRuntime>::Error: Into<ModuleRuntimeErrorReason>,
 {
     pub fn new(inner: H, policy: Policy, runtime: M) -> Self {
         Authorization {
@@ -30,31 +36,46 @@ where
             inner: Arc::new(inner),
         }
     }
+
+    #[cfg(feature = "runtime-kubernetes")]
+    fn get_auth_id(req: &Request<Body>) -> AuthId {
+        let token = req.headers().get(header::AUTHORIZATION);
+        match token {
+            Some(_) => AuthId::Value(1),
+            _ => AuthId::None
+        }
+    }
+
+    #[cfg(feature = "runtime-docker")]
+    fn get_auth_id(req: &Request<Body>) -> AuthId {
+        req.extensions()
+            .get::<Pid>()
+            .cloned()
+            .unwrap_or_else(|| Pid::None)// todo convert to AuthId
+    }
 }
 
 impl<H, M> Handler<Parameters> for Authorization<H, M>
-where
-    H: Handler<Parameters> + Sync,
-    M: 'static + ModuleRuntime + Send,
-    for<'r> &'r <M as ModuleRuntime>::Error: Into<ModuleRuntimeErrorReason>,
+    where
+        H: Handler<Parameters> + Sync,
+        M: 'static + ModuleRuntime + Send,
+        for<'r> &'r <M as ModuleRuntime>::Error: Into<ModuleRuntimeErrorReason>,
 {
     fn handle(
         &self,
         req: Request<Body>,
         params: Parameters,
-    ) -> Box<dyn Future<Item = Response<Body>, Error = Error> + Send> {
-        let (name, pid) = (
-            params.name("name").map(|n| n.to_string()),
-            req.extensions()
-                .get::<Pid>()
-                .cloned()
-                .unwrap_or_else(|| Pid::None),
-        );
+    ) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
+        let name = params.name("name").map(|n| n.to_string());
+        let auth_id = <Authorization<H, M>>::get_auth_id(&req);
+
+        println!("{:?}, {}", name, auth_id);
+
         let inner = self.inner.clone();
 
         let response =
             self.auth
-                .authorize(name.clone(), pid)
+                .authorize(name.clone(), auth_id)
                 .then(|authorized| {
                     authorized
                         .context(ErrorKind::Authorization)
@@ -76,6 +97,7 @@ where
         Box::new(response)
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -227,7 +249,7 @@ mod tests {
             &self,
             _req: Request<Body>,
             _params: Parameters,
-        ) -> Box<dyn Future<Item = Response<Body>, Error = HttpError> + Send> {
+        ) -> Box<dyn Future<Item=Response<Body>, Error=HttpError> + Send> {
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .body("from TestHandler".into())
@@ -324,7 +346,7 @@ mod tests {
         type InitFuture = FutureResult<(), Self::Error>;
         type ListFuture = FutureResult<Vec<Self::Module>, Self::Error>;
         type ListWithDetailsStream =
-            Box<dyn Stream<Item = (Self::Module, ModuleRuntimeState), Error = Self::Error> + Send>;
+        Box<dyn Stream<Item=(Self::Module, ModuleRuntimeState), Error=Self::Error> + Send>;
         type LogsFuture = FutureResult<Self::Logs, Self::Error>;
         type RemoveFuture = FutureResult<(), Self::Error>;
         type RestartFuture = FutureResult<(), Self::Error>;

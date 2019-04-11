@@ -46,8 +46,15 @@ pub fn create_app<'a, 'b>() -> App<'a, 'b> {
     )
 }
 
+#[cfg(feature = "runtime-docker")]
 pub fn log_banner() {
     info!("Starting Azure IoT Edge Security Daemon");
+    info!("Version - {}", edgelet_core::version());
+}
+
+#[cfg(feature = "runtime-kubernetes")]
+pub fn log_banner() {
+    info!("Starting Azure IoT Edge Security Daemon (Kubernetes)");
     info!("Version - {}", edgelet_core::version());
 }
 

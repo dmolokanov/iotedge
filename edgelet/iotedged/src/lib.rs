@@ -3,10 +3,10 @@
 #![deny(rust_2018_idioms, warnings)]
 #![deny(clippy::all, clippy::pedantic)]
 #![allow(
-    clippy::doc_markdown, // clippy want the "IoT" of "IoT Hub" in a code fence
-    clippy::module_name_repetitions,
-    clippy::shadow_unrelated,
-    clippy::use_self,
+clippy::doc_markdown, // clippy want the "IoT" of "IoT Hub" in a code fence
+clippy::module_name_repetitions,
+clippy::shadow_unrelated,
+clippy::use_self,
 )]
 
 pub mod app;
@@ -143,11 +143,13 @@ const EDGE_SETTINGS_STATE_FILENAME: &str = "settings_state";
 const EDGE_SETTINGS_SUBDIR: &str = "cache";
 
 /// These are the properties of the workload CA certificate
-const IOTEDGED_VALIDITY: u64 = 7_776_000; // 90 days
+const IOTEDGED_VALIDITY: u64 = 7_776_000;
+// 90 days
 const IOTEDGED_COMMONNAME: &str = "iotedged workload ca";
 const IOTEDGED_TLS_COMMONNAME: &str = "iotedged";
 
-const IOTEDGE_ID_CERT_MAX_DURATION_SECS: i64 = 7200; // 2 hours
+const IOTEDGE_ID_CERT_MAX_DURATION_SECS: i64 = 7200;
+// 2 hours
 const IOTEDGE_SERVER_CERT_MAX_DURATION_SECS: i64 = 7_776_000; // 90 days
 
 pub struct Main {
@@ -160,8 +162,8 @@ impl Main {
     }
 
     pub fn run_until<F>(self, shutdown_signal: F) -> Result<(), Error>
-    where
-        F: Future<Item = (), Error = ()> + Send + 'static,
+        where
+            F: Future<Item=(), Error=()> + Send + 'static,
     {
         let Main { settings } = self;
 
@@ -343,8 +345,8 @@ pub fn get_proxy_uri(https_proxy: Option<String>) -> Result<Option<Uri>, Error> 
 }
 
 fn prepare_workload_ca<C>(crypto: &C) -> Result<(), Error>
-where
-    C: CreateCertificate,
+    where
+        C: CreateCertificate,
 {
     let edgelet_ca_props = CertificateProperties::new(
         IOTEDGED_VALIDITY,
@@ -352,7 +354,7 @@ where
         CertificateType::Ca,
         IOTEDGED_CA_ALIAS.to_string(),
     )
-    .with_issuer(CertificateIssuer::DeviceCa);
+        .with_issuer(CertificateIssuer::DeviceCa);
 
     crypto
         .create_certificate(&edgelet_ca_props)
@@ -363,8 +365,8 @@ where
 }
 
 fn destroy_workload_ca<C>(crypto: &C) -> Result<(), Error>
-where
-    C: CreateCertificate,
+    where
+        C: CreateCertificate,
 {
     crypto
         .destroy_certificate(IOTEDGED_CA_ALIAS.to_string())
@@ -382,10 +384,10 @@ fn check_settings_state<M, C>(
     crypto: &C,
     tokio_runtime: &mut tokio::runtime::Runtime,
 ) -> Result<(), Error>
-where
-    M: ModuleRuntime,
-    <M as ModuleRuntime>::RemoveAllFuture: 'static,
-    C: MasterEncryptionKey + CreateCertificate,
+    where
+        M: ModuleRuntime,
+        <M as ModuleRuntime>::RemoveAllFuture: 'static,
+        C: MasterEncryptionKey + CreateCertificate,
 {
     info!("Detecting if configuration file has changed...");
     let path = subdir_path.join(filename);
@@ -398,7 +400,7 @@ where
         info!("No change to configuration file detected.");
 
         #[allow(clippy::single_match_else)]
-        match prepare_workload_ca(crypto) {
+            match prepare_workload_ca(crypto) {
             Ok(()) => info!("Obtaining workload CA succeeded."),
             Err(_) => {
                 reconfig_reqd = true;
@@ -427,10 +429,10 @@ fn reconfigure<M, C>(
     crypto: &C,
     tokio_runtime: &mut tokio::runtime::Runtime,
 ) -> Result<(), Error>
-where
-    M: ModuleRuntime,
-    <M as ModuleRuntime>::RemoveAllFuture: 'static,
-    C: MasterEncryptionKey + CreateCertificate,
+    where
+        M: ModuleRuntime,
+        <M as ModuleRuntime>::RemoveAllFuture: 'static,
+        C: MasterEncryptionKey + CreateCertificate,
 {
     // Remove all edge containers and destroy the cache (settings and dps backup)
     info!("Removing all modules...");
@@ -485,11 +487,11 @@ fn start_api<HC, K, F, C, W>(
     crypto: &C,
     mut tokio_runtime: tokio::runtime::Runtime,
 ) -> Result<(), Error>
-where
-    F: Future<Item = (), Error = ()> + Send + 'static,
-    HC: ClientImpl + 'static,
-    K: Sign + Clone + Send + Sync + 'static,
-    C: CreateCertificate
+    where
+        F: Future<Item=(), Error=()> + Send + 'static,
+        HC: ClientImpl + 'static,
+        K: Sign + Clone + Send + Sync + 'static,
+        C: CreateCertificate
         + Decrypt
         + Encrypt
         + GetTrustBundle
@@ -498,7 +500,7 @@ where
         + Send
         + Sync
         + 'static,
-    W: WorkloadConfig + Clone + Send + Sync + 'static,
+        W: WorkloadConfig + Clone + Send + Sync + 'static,
 {
     let hub_name = workload_config.iot_hub_name().to_string();
     let device_id = workload_config.device_id().to_string();
@@ -510,7 +512,7 @@ where
         IOTHUB_API_VERSION.to_string(),
         Url::parse(&hostname).context(ErrorKind::Initialize(InitializeErrorReason::HttpClient))?,
     )
-    .context(ErrorKind::Initialize(InitializeErrorReason::HttpClient))?;
+        .context(ErrorKind::Initialize(InitializeErrorReason::HttpClient))?;
     let device_client = DeviceClient::new(http_client, device_id.clone())
         .context(ErrorKind::Initialize(InitializeErrorReason::DeviceClient))?;
     let id_man = HubIdentityManager::new(key_store.clone(), device_client);
@@ -524,7 +526,7 @@ where
         CertificateType::Server,
         "iotedge-tls".to_string(),
     )
-    .with_issuer(CertificateIssuer::DeviceCa);
+        .with_issuer(CertificateIssuer::DeviceCa);
 
     let cert_manager = Arc::new(CertificateManager::new(crypto.clone(), edgelet_cert_props));
 
@@ -624,9 +626,9 @@ fn dps_symmetric_key_provision<HC, M>(
     tokio_runtime: &mut tokio::runtime::Runtime,
     key: &str,
 ) -> Result<(DerivedKeyStore<MemoryKey>, ProvisioningResult, MemoryKey, M), Error>
-where
-    HC: 'static + ClientImpl,
-    M: ModuleRuntime + Send + 'static,
+    where
+        HC: 'static + ClientImpl,
+        M: ModuleRuntime + Send + 'static,
 {
     let mut memory_hsm = MemoryKeyStore::new();
     let key_bytes = base64::decode(key).context(ErrorKind::SymmetricKeyMalformed)?;
@@ -642,9 +644,9 @@ where
         provisioning.registration_id().to_string(),
         DPS_API_VERSION.to_string(),
     )
-    .context(ErrorKind::Initialize(
-        InitializeErrorReason::DpsProvisioningClient,
-    ))?;
+        .context(ErrorKind::Initialize(
+            InitializeErrorReason::DpsProvisioningClient,
+        ))?;
     let provision_with_file_backup = BackupProvisioning::new(dps, backup_path);
 
     let provision = provision_with_file_backup
@@ -692,9 +694,9 @@ fn dps_tpm_provision<HC, M>(
     runtime: M,
     tokio_runtime: &mut tokio::runtime::Runtime,
 ) -> Result<(DerivedKeyStore<TpmKey>, ProvisioningResult, TpmKey, M), Error>
-where
-    HC: 'static + ClientImpl,
-    M: ModuleRuntime + Send + 'static,
+    where
+        HC: 'static + ClientImpl,
+        M: ModuleRuntime + Send + 'static,
 {
     let tpm = Tpm::new().context(ErrorKind::Initialize(
         InitializeErrorReason::DpsProvisioningClient,
@@ -714,9 +716,9 @@ where
         ek_result,
         srk_result,
     )
-    .context(ErrorKind::Initialize(
-        InitializeErrorReason::DpsProvisioningClient,
-    ))?;
+        .context(ErrorKind::Initialize(
+            InitializeErrorReason::DpsProvisioningClient,
+        ))?;
     let tpm_hsm = TpmKeyStore::from_hsm(tpm).context(ErrorKind::Initialize(
         InitializeErrorReason::DpsProvisioningClient,
     ))?;
@@ -766,10 +768,10 @@ fn start_runtime<K, HC>(
     device_id: &str,
     settings: &Settings<DockerConfig>,
     shutdown: Receiver<()>,
-) -> Result<impl Future<Item = (), Error = Error>, Error>
-where
-    K: 'static + Sign + Clone + Send + Sync,
-    HC: 'static + ClientImpl,
+) -> Result<impl Future<Item=(), Error=Error>, Error>
+    where
+        K: 'static + Sign + Clone + Send + Sync,
+        HC: 'static + ClientImpl,
 {
     let spec = settings.agent().clone();
     let env = build_env(spec.env(), hostname, device_id, settings);
@@ -779,7 +781,7 @@ where
         spec.config().clone(),
         env,
     )
-    .context(ErrorKind::Initialize(InitializeErrorReason::EdgeRuntime))?;
+        .context(ErrorKind::Initialize(InitializeErrorReason::EdgeRuntime))?;
 
     // volume mount management and workload URIs
     vol_mount_uri(
@@ -817,7 +819,7 @@ fn vol_mount_uri(config: &mut DockerConfig, uris: &[&Url]) -> Result<(), Error> 
             // On Windows we mount the parent folder because we can't mount the
             // socket files directly
             #[cfg(windows)]
-            let path = path
+                let path = path
                 .parent()
                 .ok_or_else(|| ErrorKind::Initialize(InitializeErrorReason::InvalidSocketUri))?;
             let path = path
@@ -886,11 +888,11 @@ fn start_management<C, K, HC>(
     id_man: &HubIdentityManager<DerivedKeyStore<K>, HC, K>,
     shutdown: Receiver<()>,
     cert_manager: Arc<CertificateManager<C>>,
-) -> impl Future<Item = (), Error = Error>
-where
-    C: CreateCertificate + Clone,
-    K: 'static + Sign + Clone + Send + Sync,
-    HC: 'static + ClientImpl + Send + Sync,
+) -> impl Future<Item=(), Error=Error>
+    where
+        C: CreateCertificate + Clone,
+        K: 'static + Sign + Clone + Send + Sync,
+        HC: 'static + ClientImpl + Send + Sync,
 {
     info!("Starting management API...");
 
@@ -926,10 +928,10 @@ fn start_workload<K, C, CE, W>(
     crypto: &C,
     cert_manager: Arc<CertificateManager<CE>>,
     config: W,
-) -> impl Future<Item = (), Error = Error>
-where
-    K: KeyStore + Clone + Send + Sync + 'static,
-    C: CreateCertificate
+) -> impl Future<Item=(), Error=Error>
+    where
+        K: KeyStore + Clone + Send + Sync + 'static,
+        C: CreateCertificate
         + Decrypt
         + Encrypt
         + GetTrustBundle
@@ -938,8 +940,8 @@ where
         + Send
         + Sync
         + 'static,
-    CE: CreateCertificate + Clone,
-    W: WorkloadConfig + Clone + Send + Sync + 'static,
+        CE: CreateCertificate + Clone,
+        W: WorkloadConfig + Clone + Send + Sync + 'static,
 {
     info!("Starting workload API...");
 
@@ -1062,7 +1064,7 @@ mod tests {
             &crypto,
             &mut tokio_runtime,
         )
-        .unwrap();
+            .unwrap();
         let expected = serde_json::to_string(&settings).unwrap();
         let expected_sha = Sha256::digest_str(&expected);
         let expected_base64 = base64::encode(&expected_sha);
@@ -1094,7 +1096,7 @@ mod tests {
             &crypto,
             &mut tokio_runtime,
         )
-        .unwrap();
+            .unwrap();
         let mut written = String::new();
         File::open(tmp_dir.path().join("settings_state"))
             .unwrap()
@@ -1111,7 +1113,7 @@ mod tests {
             &crypto,
             &mut tokio_runtime,
         )
-        .unwrap();
+            .unwrap();
         let expected = serde_json::to_string(&settings1).unwrap();
         let expected_sha = Sha256::digest_str(&expected);
         let expected_base64 = base64::encode(&expected_sha);

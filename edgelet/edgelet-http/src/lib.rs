@@ -124,6 +124,7 @@ where
 
             debug!("accepted new connection ({})", addr);
             let pid = socket.pid()?;
+            error!("{}", pid);
             let fut = new_service
                 .new_service()
                 .then(move |srv| match srv {
@@ -133,6 +134,9 @@ where
                         log_failure(Level::Error, &err);
                         Err(())
                     }
+                })
+                .and_then(move |(srv, addr)| {
+                    Ok((srv, addr))
                 })
                 .and_then(move |(srv, addr)| {
                     let service = PidService::new(pid, srv);

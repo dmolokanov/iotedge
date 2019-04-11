@@ -45,3 +45,8 @@ win-logger = { path = "../win-logger" }
 tempdir = "0.3.7"
 
 edgelet-test-utils = { path = "../edgelet-test-utils" }
+
+[features]
+default = ["runtime-docker"]
+runtime-docker = ["edgelet-core/runtime-docker", "edgelet-http/runtime-docker"]
+runtime-kubernetes = ["edgelet-core/runtime-kubernetes", "edgelet-http/runtime-kubernetes"]
