@@ -7,8 +7,8 @@ use log::info;
 
 use crate::error::{Error, ErrorKind};
 use crate::module::{ModuleRuntime, ModuleRuntimeErrorReason};
-use crate::pid::Pid;
-use crate::authorization::Policy;
+use crate::authorization::{Policy, AuthId};
+use std::{fmt, cmp};
 
 pub struct Authorization<M> {
     runtime: M,
@@ -27,13 +27,13 @@ where
     pub fn authorize(
         &self,
         name: Option<String>,
-        pid: Pid,
+        auth_id: AuthId,
     ) -> impl Future<Item = bool, Error = Error> {
         let name = name.map(|n| n.trim_start_matches('$').to_string());
         match self.policy {
             Policy::Anonymous => Either::A(Either::A(self.auth_anonymous())),
-            Policy::Caller => Either::A(Either::B(self.auth_caller(name, pid))),
-            Policy::Module(ref expected_name) => Either::B(self.auth_module(expected_name, pid)),
+            Policy::Caller => Either::A(Either::B(self.auth_caller(name, auth_id))),
+            Policy::Module(ref expected_name) => Either::B(self.auth_module(expected_name, auth_id)),
         }
     }
 
@@ -44,18 +44,18 @@ where
     fn auth_caller(
         &self,
         name: Option<String>,
-        pid: Pid,
+        auth_id: AuthId,
     ) -> impl Future<Item = bool, Error = Error> {
         name.map_or_else(
             || Either::A(future::ok(false)),
             |name| {
                 Either::B(self.runtime.top(&name).then(move |result| match result {
                     Ok(mt) => {
-                        let authorize = mt.process_ids().contains(&pid);
+                        let authorize = mt.process_ids().into_iter().any(|pid| &auth_id == pid);
                         if !authorize {
                             info!(
-                                "Request not authorized - caller pid {} not found in module {}",
-                                pid, name
+                                "Request not authorized - caller id {} not found in module {}",
+                                auth_id, name
                             );
                         }
                         Ok(authorize)
@@ -75,15 +75,15 @@ where
     fn auth_module(
         &self,
         expected_name: &'static str,
-        pid: Pid,
+        auth_id: AuthId,
     ) -> impl Future<Item = bool, Error = Error> {
         self.runtime
             .get(expected_name)
             .then(move |m| match m {
                 Ok((_, rs)) => match rs.pid() {
-                    p if p == pid => Ok(true),
+                    p if auth_id == p => Ok(true),
                     _ => {
-                        info!("Request not authorized - expected caller pid: {}, actual caller pid: {}", rs.pid(), pid);
+                        info!("Request not authorized - expected caller id: {}, actual caller id: {}", rs.pid(), auth_id);
                         Ok(false)
                     },
                 },
@@ -95,6 +95,80 @@ where
                     _ => Err(Error::from(err.context(ErrorKind::ModuleRuntime))),
                 },
             })
+    }
+}
+
+// todo make runtime specific
+#[derive(Clone, Copy, Debug)]
+pub enum AuthId {
+    None,
+    Any,
+    Value(i32),
+}
+
+impl fmt::Display for AuthId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            AuthId::None => write!(f, "none"),
+            AuthId::Any => write!(f, "any"),
+            AuthId::Value(pid) => write!(f, "{}", pid),
+        }
+    }
+}
+
+/// AuthId are considered not equal when compared against
+/// None, or equal when compared against Any. None takes
+/// precedence, so Any is not equal to None.
+impl cmp::PartialEq for AuthId {
+    fn eq(&self, other: &AuthId) -> bool {
+        match *self {
+            AuthId::None => false,
+            AuthId::Any => match *other {
+                AuthId::None => false,
+                _ => true,
+            },
+            AuthId::Value(pid1) => match *other {
+                AuthId::None => false,
+                AuthId::Any => true,
+                AuthId::Value(pid2) => pid1 == pid2,
+            },
+        }
+    }
+}
+
+impl cmp::PartialEq<Pid> for AuthId {
+    fn eq(&self, other: &Pid) -> bool {
+        match *self {
+            AuthId::None => false,
+            AuthId::Any => match *other {
+                Pid::None => false,
+                _ => true,
+            },
+            AuthId::Value(pid1) => match *other {
+                Pid::None => false,
+                Pid::Any => true,
+                Pid::Value(pid2) => pid1 == pid2,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_eq() {
+        assert_ne!(AuthId::None, AuthId::None);
+        assert_ne!(AuthId::None, AuthId::Any);
+        assert_ne!(AuthId::None, AuthId::Value(42));
+        assert_ne!(AuthId::Any, AuthId::None);
+        assert_eq!(AuthId::Any, AuthId::Any);
+        assert_eq!(AuthId::Any, AuthId::Value(42));
+        assert_ne!(AuthId::Value(42), AuthId::None);
+        assert_eq!(AuthId::Value(42), AuthId::Any);
+        assert_eq!(AuthId::Value(42), AuthId::Value(42));
+        assert_ne!(AuthId::Value(0), AuthId::Value(42));
     }
 }
 
@@ -116,7 +190,7 @@ mod tests {
     fn should_authorize_anonymous() {
         let runtime = TestModuleList::new(vec![]);
         let auth = Authorization::new(runtime, Policy::Anonymous);
-        assert_eq!(true, auth.authorize(None, Pid::None).wait().unwrap());
+        assert_eq!(true, auth.authorize(None, AuthId::None).wait().unwrap());
     }
 
     #[test]
@@ -128,7 +202,7 @@ mod tests {
         let auth = Authorization::new(runtime, Policy::Caller);
         assert_eq!(
             true,
-            auth.authorize(Some("abc".to_string()), Pid::Value(123))
+            auth.authorize(Some("abc".to_string()), AuthId::Value(123))
                 .wait()
                 .unwrap()
         );
@@ -143,7 +217,7 @@ mod tests {
         let auth = Authorization::new(runtime, Policy::Caller);
         assert_eq!(
             true,
-            auth.authorize(Some("$edgeAgent".to_string()), Pid::Value(123))
+            auth.authorize(Some("$edgeAgent".to_string()), AuthId::Value(123))
                 .wait()
                 .unwrap()
         );
@@ -153,7 +227,7 @@ mod tests {
     fn should_reject_caller_without_name() {
         let runtime = TestModuleList::new(vec![TestModule::new("abc", 123)]);
         let auth = Authorization::new(runtime, Policy::Caller);
-        assert_eq!(false, auth.authorize(None, Pid::Value(123)).wait().unwrap());
+        assert_eq!(false, auth.authorize(None, AuthId::Value(123)).wait().unwrap());
     }
 
     #[test]
@@ -162,7 +236,7 @@ mod tests {
         let auth = Authorization::new(runtime, Policy::Caller);
         assert_eq!(
             false,
-            auth.authorize(Some("xyz".to_string()), Pid::Value(123))
+            auth.authorize(Some("xyz".to_string()), AuthId::Value(123))
                 .wait()
                 .unwrap()
         );
@@ -174,7 +248,7 @@ mod tests {
         let auth = Authorization::new(runtime, Policy::Caller);
         assert_eq!(
             false,
-            auth.authorize(Some("abc".to_string()), Pid::Value(456))
+            auth.authorize(Some("abc".to_string()), AuthId::Value(456))
                 .wait()
                 .unwrap()
         );
@@ -188,7 +262,7 @@ mod tests {
             TestModuleListBehavior::FailCall,
         );
         let auth = Authorization::new(runtime, Policy::Caller);
-        auth.authorize(Some("abc".to_string()), Pid::Value(123))
+        auth.authorize(Some("abc".to_string()), AuthId::Value(123))
             .wait()
             .unwrap();
     }
@@ -200,31 +274,31 @@ mod tests {
             TestModule::new("abc", 123),
         ]);
         let auth = Authorization::new(runtime, Policy::Module("abc"));
-        assert_eq!(true, auth.authorize(None, Pid::Value(123)).wait().unwrap());
+        assert_eq!(true, auth.authorize(None, AuthId::Value(123)).wait().unwrap());
     }
 
     #[test]
     fn should_reject_module_whose_name_does_not_match_policy() {
         let runtime = TestModuleList::new(vec![TestModule::new("xyz", 123)]);
         let auth = Authorization::new(runtime, Policy::Module("abc"));
-        assert_eq!(false, auth.authorize(None, Pid::Value(123)).wait().unwrap());
+        assert_eq!(false, auth.authorize(None, AuthId::Value(123)).wait().unwrap());
     }
 
     #[test]
     fn should_reject_module_with_different_pid() {
         let runtime = TestModuleList::new(vec![TestModule::new("abc", 123)]);
         let auth = Authorization::new(runtime, Policy::Module("abc"));
-        assert_eq!(false, auth.authorize(None, Pid::Value(456)).wait().unwrap());
+        assert_eq!(false, auth.authorize(None, AuthId::Value(456)).wait().unwrap());
     }
 
     #[test]
     fn should_reject_module_when_runtime_returns_no_pid() {
         let runtime = TestModuleList::new_with_behavior(
             vec![TestModule::new("abc", 123)],
-            TestModuleListBehavior::NoPid,
+            TestModuleListBehavior::NoAuthId,
         );
         let auth = Authorization::new(runtime, Policy::Module("abc"));
-        assert_eq!(false, auth.authorize(None, Pid::Value(123)).wait().unwrap());
+        assert_eq!(false, auth.authorize(None, AuthId::Value(123)).wait().unwrap());
     }
 
     #[test]
@@ -235,7 +309,7 @@ mod tests {
             TestModuleListBehavior::FailCall,
         );
         let auth = Authorization::new(runtime, Policy::Module("abc"));
-        auth.authorize(Some("abc".to_string()), Pid::Value(123))
+        auth.authorize(Some("abc".to_string()), AuthId::Value(123))
             .wait()
             .unwrap();
     }
@@ -411,7 +485,7 @@ mod tests {
                         )
                     })
                     .into_future(),
-                TestModuleListBehavior::NoPid => module
+                TestModuleListBehavior::NoAuthId => module
                     .map(|m| (m.clone(), ModuleRuntimeState::default()))
                     .into_future(),
                 TestModuleListBehavior::FailCall => notimpl_error!(),

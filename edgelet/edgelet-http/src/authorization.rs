@@ -9,8 +9,10 @@ use hyper::{Body, Request, Response};
 #[cfg(feature = "runtime-kubernetes")]
 use hyper::header;
 
+use edgelet_core::{Authorization as CoreAuth, ModuleRuntime, ModuleRuntimeErrorReason, Policy, AuthId};
+
+#[cfg(feature = "runtime-docker")]
 use edgelet_core::pid::Pid;
-use edgelet_core::{Authorization as CoreAuth, ModuleRuntime, ModuleRuntimeErrorReason, Policy};
 
 use crate::error::{Error, ErrorKind};
 use crate::route::{Handler, Parameters};
@@ -39,19 +41,29 @@ impl<H, M> Authorization<H, M>
 
     #[cfg(feature = "runtime-kubernetes")]
     fn get_auth_id(req: &Request<Body>) -> AuthId {
-        let token = req.headers().get(header::AUTHORIZATION);
+        let token = req.headers()
+            .get(header::AUTHORIZATION);
         match token {
-            Some(_) => AuthId::Value(1),
+            Some(value) => match value.to_str().ok() {
+                Some(token) => AuthId::Value(String::from(&token[7..])),
+                _ => AuthId::None
+            },
             _ => AuthId::None
         }
     }
 
     #[cfg(feature = "runtime-docker")]
     fn get_auth_id(req: &Request<Body>) -> AuthId {
-        req.extensions()
+        let pid = req.extensions()
             .get::<Pid>()
             .cloned()
-            .unwrap_or_else(|| Pid::None)// todo convert to AuthId
+            .unwrap_or_else(|| Pid::None);
+
+        match pid {
+            Pid::None => { AuthId::None }
+            Pid::Any => { AuthId::Any }
+            Pid::Value(pid) => { AuthId::Value(pid) }
+        }
     }
 }
 
@@ -68,8 +80,6 @@ impl<H, M> Handler<Parameters> for Authorization<H, M>
     ) -> Box<dyn Future<Item=Response<Body>, Error=Error> + Send> {
         let name = params.name("name").map(|n| n.to_string());
         let auth_id = <Authorization<H, M>>::get_auth_id(&req);
-
-        println!("{:?}, {}", name, auth_id);
 
         let inner = self.inner.clone();
 
