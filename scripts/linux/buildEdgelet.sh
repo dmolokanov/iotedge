@@ -69,6 +69,17 @@ print_help_and_exit()
     exit 1
 }
 
+print_args()
+{
+    echo "Project:      $EDGELET_DIR/$PROJECT"
+    echo "Arch:         $ARCH"
+    echo "Toolchain:    $TOOLCHAIN"
+    echo "Image:        $DOCKER_IMAGENAME"
+    echo "Namespace:    $DOCKER_NAMESPACE"
+    echo "Dockerfile:   $DOCKERFILE"
+    echo
+}
+
 ###############################################################################
 # Obtain and validate the options supported by this script
 ###############################################################################
@@ -164,17 +175,6 @@ process_args()
     fi
 }
 
-print_args()
-{
-    echo "Project:      $EDGELET_DIR/$PROJECT"
-    echo "Arch:         $ARCH"
-    echo "Toolchain:    $TOOLCHAIN"
-    echo "Image:        $DOCKER_IMAGENAME"
-    echo "Namespace:    $DOCKER_NAMESPACE"
-    echo "Dockerfile:   $DOCKERFILE"
-    echo
-}
-
 ###############################################################################
 # Build project and publish result
 ###############################################################################
@@ -183,11 +183,8 @@ build_project()
     # build project with cross
     cd ${EDGELET_DIR}
 
-    local BUILD_CMD="cross build -p ${PROJECT} ${BUILD_CONFIG_OPTION} --target ${TOOLCHAIN}"
-    echo ${BUILD_CMD}
-    ${BUILD_CMD}
-
-    ${STRIP} ${EDGELET_DIR}/target/${TOOLCHAIN}/${BUILD_CONFIGURATION}/${PROJECT}
+    execute cross build -p ${PROJECT} ${BUILD_CONFIG_OPTION} --target ${TOOLCHAIN}
+    execute ${STRIP} ${EDGELET_DIR}/target/${TOOLCHAIN}/${BUILD_CONFIGURATION}/${PROJECT}
 
     # prepare docker folder
     local EXE_DOCKER_DIR=${PUBLISH_DIR}/${DOCKER_IMAGENAME}/docker/linux/${ARCH}
@@ -195,15 +192,24 @@ build_project()
 
     # copy Dockerfile to publish folder for given arch
     local EXE_DOCKERFILE=${EXE_DOCKER_DIR}/Dockerfile
-
-    local COPY_DOCKERFILE_CMD="cp ${DOCKERFILE} ${EXE_DOCKERFILE}"
-    echo ${COPY_DOCKERFILE_CMD}
-    ${COPY_DOCKERFILE_CMD}
+    execute cp ${DOCKERFILE} ${EXE_DOCKERFILE}
 
     # copy binaries to publish folder
-    local COPY_CMD="cp ${EDGELET_DIR}/target/${TOOLCHAIN}/${BUILD_CONFIGURATION}/${PROJECT} ${EXE_DOCKER_DIR}/${PROJECT}.*"
-    echo ${COPY_CMD}
-    ${COPY_CMD}
+    execute cp ${EDGELET_DIR}/target/${TOOLCHAIN}/${BUILD_CONFIGURATION}/${PROJECT} ${EXE_DOCKER_DIR}/${PROJECT}
+
+    if [[ ${PROJECT} == "iotedged" ]]; then
+        execute cp ${EDGELET_DIR}/target/${TOOLCHAIN}/${BUILD_CONFIGURATION}/build/hsm-sys-*/out/lib/*.so* ${EXE_DOCKER_DIR}/
+    fi
+}
+
+###############################################################################
+# Print given command and execute it
+###############################################################################
+execute()
+{
+    echo "\$ $@"
+    "$@"
+    echo
 }
 
 ###############################################################################
