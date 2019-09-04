@@ -1,5 +1,5 @@
 // Copyright (c) Microsoft. All rights reserved.
-
+#![allow(dead_code, unused_variables)]
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
@@ -191,7 +191,11 @@ where
                 Either::A(res)
             }
 
-            None => Either::B(create_and_start(runtime, &id_mgr, spec, module_id)),
+            None => {
+                info!("EdgeAgent does not exist. No need to restart");
+                Either::B(future::ok(()))
+                //Either::B(create_and_start(runtime, &id_mgr, spec, module_id))
+            },
         })
         .map(|_| ())
 }

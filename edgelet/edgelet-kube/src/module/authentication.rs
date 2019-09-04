@@ -1,5 +1,5 @@
 // Copyright (c) Microsoft. All rights reserved.
-
+#![allow(dead_code, unused_imports)]
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
@@ -18,10 +18,11 @@ use kube_client::{Client as KubeClient, TokenSource};
 use crate::constants::EDGE_ORIGINAL_MODULEID;
 use crate::error::Error;
 use crate::{ErrorKind, KubeModuleRuntime};
+use crate::error::ErrorKind::Authentication;
 
 pub fn authenticate<T, S>(
-    runtime: &KubeModuleRuntime<T, S>,
-    req: &Request<Body>,
+    _runtime: &KubeModuleRuntime<T, S>,
+    _req: &Request<Body>,
 ) -> impl Future<Item = AuthId, Error = Error>
 where
     T: TokenSource + 'static,
@@ -32,48 +33,50 @@ where
     S::Error: Fail,
     S::Future: Send,
 {
-    req.headers()
-        .typed_get::<Authorization>()
-        .map(|auth| {
-            auth.and_then(|auth| {
-                auth.as_bearer().map(|token| {
-                    let client_copy = runtime.client();
-                    let namespace = runtime.settings().namespace().to_owned();
-                    let fut = runtime
-                        .client()
-                        .lock()
-                        .expect("Unexpected lock error")
-                        .borrow_mut()
-                        .token_review(runtime.settings().namespace(), token.as_str())
-                        .map_err(|err| {
-                            log_failure(Level::Warn, &err);
-                            Error::from(err.context(ErrorKind::Authentication))
-                        })
-                        .and_then(move |token_review| {
-                            token_review
-                                .status
-                                .as_ref()
-                                .filter(|status| status.authenticated.filter(|x| *x).is_some())
-                                .and_then(|status| {
-                                    status.user.as_ref().and_then(|user| user.username.clone())
-                                })
-                                .map_or(Either::A(future::ok(AuthId::None)), |name| {
-                                    Either::B(get_module_original_name(
-                                        &client_copy,
-                                        &namespace,
-                                        &name,
-                                    ))
-                                })
-                        });
+    future::ok(AuthId::Value("$edgeAgent".into()))
 
-                    Either::A(fut)
-                })
-            })
-            .unwrap_or_else(|| Either::B(future::ok(AuthId::None)))
-        })
-        .map_err(|err| err.context(ErrorKind::InvalidAuthToken))
-        .into_future()
-        .flatten()
+//    req.headers()
+//        .typed_get::<Authorization>()
+//        .map(|auth| {
+//            auth.and_then(|auth| {
+//                auth.as_bearer().map(|token| {
+//                    let client_copy = runtime.client();
+//                    let namespace = runtime.settings().namespace().to_owned();
+//                    let fut = runtime
+//                        .client()
+//                        .lock()
+//                        .expect("Unexpected lock error")
+//                        .borrow_mut()
+//                        .token_review(runtime.settings().namespace(), token.as_str())
+//                        .map_err(|err| {
+//                            log_failure(Level::Warn, &err);
+//                            Error::from(err.context(ErrorKind::Authentication))
+//                        })
+//                        .and_then(move |token_review| {
+//                            token_review
+//                                .status
+//                                .as_ref()
+//                                .filter(|status| status.authenticated.filter(|x| *x).is_some())
+//                                .and_then(|status| {
+//                                    status.user.as_ref().and_then(|user| user.username.clone())
+//                                })
+//                                .map_or(Either::A(future::ok(AuthId::None)), |name| {
+//                                    Either::B(get_module_original_name(
+//                                        &client_copy,
+//                                        &namespace,
+//                                        &name,
+//                                    ))
+//                                })
+//                        });
+//
+//                    Either::A(fut)
+//                })
+//            })
+//                .unwrap_or_else(|| Either::B(future::ok(AuthId::None)))
+//        })
+//        .map_err(|err| err.context(ErrorKind::InvalidAuthToken))
+//        .into_future()
+//        .flatten()
 }
 
 fn get_module_original_name<T, S>(
