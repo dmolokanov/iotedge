@@ -33,7 +33,7 @@ where
     S::Error: Fail,
     S::Future: Send,
 {
-    future::ok(AuthId::Value("$edgeAgent".into()))
+    future::ok(AuthId::Value("edgeAgent".into()))
 
 //    req.headers()
 //        .typed_get::<Authorization>()
