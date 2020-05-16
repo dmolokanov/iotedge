@@ -745,6 +745,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "mqtt-bridge"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "atty",
+ "bincode",
+ "bytes",
+ "chrono",
+ "config",
+ "criterion",
+ "fail",
+ "flate2",
+ "futures",
+ "futures-util",
+ "humantime 2.0.0",
+ "humantime-serde",
+ "itertools 0.9.0",
+ "lazy_static",
+ "matches",
+ "mqtt3",
+ "native-tls",
+ "proptest",
+ "rand 0.7.3",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "test-case",
+ "thiserror",
+ "tokio",
+ "tokio-io-timeout",
+ "tokio-native-tls",
+ "tokio-util",
+ "tracing",
+ "tracing-futures",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "mqtt-broker"
 version = "0.1.0"
 dependencies = [
