@@ -91,15 +91,17 @@ impl PartialEq for ConnectionHandle {
 /// Receives a source of packets and a handle to the Broker.
 /// Starts two tasks (sending and receiving)
 #[allow(clippy::too_many_lines)]
-pub async fn process<I, N>(
+pub async fn process<I, N, P>(
     io: I,
     remote_addr: SocketAddr,
     mut broker_handle: BrokerHandle,
     authenticator: &N,
+    make_processor: P,
 ) -> Result<(), Error>
 where
     I: AsyncRead + AsyncWrite + GetPeerInfo<Certificate = Certificate> + Unpin,
     N: Authenticator + ?Sized,
+    P: MakePacketProcessor,
 {
     let certificate = io.peer_certificate()?;
     let peer_addr = io.peer_addr()?;
@@ -176,7 +178,7 @@ where
 
                 // Start up the processing tasks
                 let (outgoing, incoming) = codec.split();
-                let processor = PacketProcessor{client_id: client_id.clone(), broker: broker_handle.clone()};
+                let processor = make_processor.make_incoming(&client_id, &broker_handle);
                 let incoming_task =
                     incoming_task(client_id.clone(), incoming, broker_handle.clone(), processor);
                 let outgoing_task = outgoing_task(client_id.clone(), events, outgoing, broker_handle.clone());
@@ -348,31 +350,17 @@ where
         mut packet: Packet,
         limits: &Arc<Semaphore>,
     ) -> Result<Option<ClientEvent>, Error> {
-        // if matches!(&packet, &Packet::Publish(_)) {
-        //     match packet {
-        //         Packet::Publish(publish) => {
-        //             // #[cfg(feature = "edgehub")]
-        //             let publish = translate_incoming_publish(&self._client_id, &mut publish);
-        //             return ClientEvent::Publish(publish);
-        //         }
-        //         _ => panic!(""),
-        //     }
-        // }
-
         match &mut packet {
             Packet::Publish(ref mut publish) => {
-                // #[cfg(feature = "edgehub")]
                 translate_incoming_publish(&self.client_id, publish);
             }
             Packet::Subscribe(subscribe) => {
-                // #[cfg(feature = "edgehub")]
                 translate_incoming_subscribe(&self.client_id, subscribe);
             }
             Packet::Unsubscribe(unsubscribe) => {
-                // #[cfg(feature = "edgehub")]
                 translate_incoming_unsubscribe(&self.client_id, unsubscribe);
             }
-            _ => {}
+            _ => (),
         }
         self.inner.process(packet, limits).await
     }
@@ -392,13 +380,51 @@ pub trait OutPacketProcessor {
     async fn process(&mut self, message: Message) -> Result<Option<ClientEvent>, Error>;
 }
 
-pub struct PacketProcessor {
+pub struct MqttPacketProcessor {
     client_id: ClientId,
     broker: BrokerHandle,
 }
 
+pub trait MakePacketProcessor {
+    type Processor: InPacketProcessor + Send + Sync;
+
+    fn make_incoming(&self, client_id: &ClientId, broker: &BrokerHandle) -> Self::Processor;
+    // fn make_outgoing(client_id: impl Into<ClientId>, broker: BrokerHandle) -> O;
+}
+
+#[derive(Debug, Clone)]
+pub struct MakeMqttPacketProcessor;
+
+impl MakePacketProcessor for MakeMqttPacketProcessor {
+    type Processor = MqttPacketProcessor;
+
+    fn make_incoming(&self, client_id: &ClientId, broker_handle: &BrokerHandle) -> Self::Processor {
+        Self::Processor {
+            client_id: client_id.clone(),
+            broker: broker_handle.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MakeEdgeHubPacketProcessor;
+
+impl MakePacketProcessor for MakeEdgeHubPacketProcessor {
+    type Processor = EdgeHubPacketProcessor<MqttPacketProcessor>;
+
+    fn make_incoming(&self, client_id: &ClientId, broker_handle: &BrokerHandle) -> Self::Processor {
+        Self::Processor {
+            client_id: client_id.clone(),
+            inner: MqttPacketProcessor {
+                client_id: client_id.clone(),
+                broker: broker_handle.clone(),
+            },
+        }
+    }
+}
+
 #[async_trait]
-impl InPacketProcessor for PacketProcessor {
+impl InPacketProcessor for MqttPacketProcessor {
     async fn process(
         &mut self,
         packet: Packet,
@@ -440,7 +466,7 @@ impl InPacketProcessor for PacketProcessor {
 }
 
 #[async_trait]
-impl OutPacketProcessor for PacketProcessor {
+impl OutPacketProcessor for MqttPacketProcessor {
     async fn process(&mut self, _message: Message) -> Result<Option<ClientEvent>, Error> {
         todo!()
     }
