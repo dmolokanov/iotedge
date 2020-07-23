@@ -1,3 +1,6 @@
+mod packet;
+pub use packet::*;
+
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
     net::SocketAddr,
@@ -5,7 +8,6 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use futures_util::{
     future::{select, Either},
     pin_mut,
@@ -29,7 +31,6 @@ use mqtt_broker_core::{
     auth::{AuthenticationContext, Authenticator, Certificate},
     ClientId,
 };
-
 #[cfg(feature = "edgehub")]
 #[allow(unused_imports)]
 use mqtt_edgehub::topic::translation::{
@@ -252,226 +253,6 @@ where
     }
 }
 
-// pub struct Incoming<S, P> {
-//     inner: S,
-//     processor: P,
-//     client_id: ClientId,
-//     broker: BrokerHandle,
-// }
-
-// impl<S, P> Incoming<S, P>
-// where
-//     S: Stream<Item = Result<Packet, DecodeError>> + Unpin,
-//     P: PacketProcessor,
-// {
-//     pub async fn run(self) -> Result<(), Error> {
-//         // We limit the number of incoming publications (PublishFrom) per client
-//         // in order to avoid (a single) publisher to occupy whole BrokerHandle queue.
-//         // This helps with QoS 0 messages throughput, due to the fact that outgoing_task
-//         // also uses sends PubAck0 for QoS 0 messages to BrokerHandle queue.
-//         let incoming_pub_limit = Arc::new(Semaphore::new(10));
-
-//         debug!("incoming_task start");
-//         while let Some(maybe_packet) = self.inner.next().await {
-//             match maybe_packet {
-//                 Ok(packet) => {
-//                     let event = match packet {
-//                         Packet::Connect(_) => {
-//                             // [MQTT-3.1.0-2] - The Server MUST process a second CONNECT Packet
-//                             // sent from a Client as a protocol violation and disconnect the Client.
-//                             warn!("CONNECT packet received on an already established connection, dropping connection due to protocol violation");
-//                             return Err(Error::ProtocolViolation);
-//                         }
-//                         Packet::ConnAck(connack) => ClientEvent::ConnAck(connack),
-//                         Packet::Disconnect(disconnect) => {
-//                             let event = ClientEvent::Disconnect(disconnect);
-//                             let message = Message::Client(client_id.clone(), event);
-//                             broker.send(message).await?;
-//                             debug!("disconnect received. shutting down receive side of connection");
-//                             return Ok(());
-//                         }
-//                         Packet::PingReq(ping) => ClientEvent::PingReq(ping),
-//                         Packet::PingResp(pingresp) => ClientEvent::PingResp(pingresp),
-//                         Packet::PubAck(puback) => ClientEvent::PubAck(puback),
-//                         Packet::PubComp(pubcomp) => ClientEvent::PubComp(pubcomp),
-//                         Packet::Publish(publish) => {
-//                             #[cfg(feature = "edgehub")]
-//                             let publish = translate_incoming_publish(&client_id, publish);
-//                             let perm = incoming_pub_limit.clone().acquire_owned().await;
-//                             ClientEvent::PublishFrom(publish, Some(perm))
-//                         }
-//                         Packet::PubRec(pubrec) => ClientEvent::PubRec(pubrec),
-//                         Packet::PubRel(pubrel) => ClientEvent::PubRel(pubrel),
-//                         Packet::Subscribe(subscribe) => {
-//                             #[cfg(feature = "edgehub")]
-//                             let subscribe = translate_incoming_subscribe(&client_id, subscribe);
-//                             ClientEvent::Subscribe(subscribe)
-//                         }
-//                         Packet::SubAck(suback) => ClientEvent::SubAck(suback),
-//                         Packet::Unsubscribe(unsubscribe) => {
-//                             #[cfg(feature = "edgehub")]
-//                             let unsubscribe =
-//                                 translate_incoming_unsubscribe(&client_id, unsubscribe);
-//                             ClientEvent::Unsubscribe(unsubscribe)
-//                         }
-//                         Packet::UnsubAck(unsuback) => ClientEvent::UnsubAck(unsuback),
-//                     };
-
-//                     let message = Message::Client(client_id.clone(), event);
-//                     broker.send(message).await?;
-//                 }
-//                 Err(e) => {
-//                     warn!(message="error occurred while reading from connection", error=%e);
-//                     return Err(e.into());
-//                 }
-//             }
-//         }
-
-//         debug!("no more packets. sending DropConnection to broker.");
-//         let message = Message::Client(client_id.clone(), ClientEvent::DropConnection);
-//         broker.send(message).await?;
-//         debug!("incoming_task completing...");
-//         Ok(())
-//     }
-// }
-
-pub struct EdgeHubPacketProcessor<P> {
-    inner: P,
-    client_id: ClientId,
-}
-
-#[async_trait]
-impl<P> InPacketProcessor for EdgeHubPacketProcessor<P>
-where
-    P: InPacketProcessor + Send,
-{
-    async fn process(
-        &mut self,
-        mut packet: Packet,
-        limits: &Arc<Semaphore>,
-    ) -> Result<Option<ClientEvent>, Error> {
-        match &mut packet {
-            Packet::Publish(ref mut publish) => {
-                translate_incoming_publish(&self.client_id, publish);
-            }
-            Packet::Subscribe(subscribe) => {
-                translate_incoming_subscribe(&self.client_id, subscribe);
-            }
-            Packet::Unsubscribe(unsubscribe) => {
-                translate_incoming_unsubscribe(&self.client_id, unsubscribe);
-            }
-            _ => (),
-        }
-        self.inner.process(packet, limits).await
-    }
-}
-
-#[async_trait]
-pub trait InPacketProcessor {
-    async fn process(
-        &mut self,
-        packet: proto::Packet,
-        limits: &Arc<Semaphore>,
-    ) -> Result<Option<ClientEvent>, Error>;
-}
-
-#[async_trait]
-pub trait OutPacketProcessor {
-    async fn process(&mut self, message: Message) -> Result<Option<ClientEvent>, Error>;
-}
-
-pub struct MqttPacketProcessor {
-    client_id: ClientId,
-    broker: BrokerHandle,
-}
-
-pub trait MakePacketProcessor {
-    type Processor: InPacketProcessor + Send + Sync;
-
-    fn make_incoming(&self, client_id: &ClientId, broker: &BrokerHandle) -> Self::Processor;
-    // fn make_outgoing(client_id: impl Into<ClientId>, broker: BrokerHandle) -> O;
-}
-
-#[derive(Debug, Clone)]
-pub struct MakeMqttPacketProcessor;
-
-impl MakePacketProcessor for MakeMqttPacketProcessor {
-    type Processor = MqttPacketProcessor;
-
-    fn make_incoming(&self, client_id: &ClientId, broker_handle: &BrokerHandle) -> Self::Processor {
-        Self::Processor {
-            client_id: client_id.clone(),
-            broker: broker_handle.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct MakeEdgeHubPacketProcessor;
-
-impl MakePacketProcessor for MakeEdgeHubPacketProcessor {
-    type Processor = EdgeHubPacketProcessor<MqttPacketProcessor>;
-
-    fn make_incoming(&self, client_id: &ClientId, broker_handle: &BrokerHandle) -> Self::Processor {
-        Self::Processor {
-            client_id: client_id.clone(),
-            inner: MqttPacketProcessor {
-                client_id: client_id.clone(),
-                broker: broker_handle.clone(),
-            },
-        }
-    }
-}
-
-#[async_trait]
-impl InPacketProcessor for MqttPacketProcessor {
-    async fn process(
-        &mut self,
-        packet: Packet,
-        limits: &Arc<Semaphore>,
-    ) -> Result<Option<ClientEvent>, Error> {
-        let event = match packet {
-            Packet::Connect(_) => {
-                // [MQTT-3.1.0-2] - The Server MUST process a second CONNECT Packet
-                // sent from a Client as a protocol violation and disconnect the Client.
-                warn!("CONNECT packet received on an already established connection, dropping connection due to protocol violation");
-                return Err(Error::ProtocolViolation);
-            }
-            Packet::ConnAck(connack) => ClientEvent::ConnAck(connack),
-            Packet::Disconnect(disconnect) => {
-                let event = ClientEvent::Disconnect(disconnect);
-                let message = Message::Client(self.client_id.clone(), event);
-                self.broker.send(message).await?;
-                debug!("disconnect received. shutting down receive side of connection");
-                return Ok(None);
-            }
-            Packet::PingReq(ping) => ClientEvent::PingReq(ping),
-            Packet::PingResp(pingresp) => ClientEvent::PingResp(pingresp),
-            Packet::PubAck(puback) => ClientEvent::PubAck(puback),
-            Packet::PubComp(pubcomp) => ClientEvent::PubComp(pubcomp),
-            Packet::Publish(publish) => {
-                let perm = limits.clone().acquire_owned().await;
-                ClientEvent::PublishFrom(publish, Some(perm))
-            }
-            Packet::PubRec(pubrec) => ClientEvent::PubRec(pubrec),
-            Packet::PubRel(pubrel) => ClientEvent::PubRel(pubrel),
-            Packet::Subscribe(subscribe) => ClientEvent::Subscribe(subscribe),
-            Packet::SubAck(suback) => ClientEvent::SubAck(suback),
-            Packet::Unsubscribe(unsubscribe) => ClientEvent::Unsubscribe(unsubscribe),
-            Packet::UnsubAck(unsuback) => ClientEvent::UnsubAck(unsuback),
-        };
-
-        Ok(Some(event))
-    }
-}
-
-#[async_trait]
-impl OutPacketProcessor for MqttPacketProcessor {
-    async fn process(&mut self, _message: Message) -> Result<Option<ClientEvent>, Error> {
-        todo!()
-    }
-}
-
 async fn incoming_task<S, P>(
     client_id: ClientId,
     mut incoming: S,
@@ -492,10 +273,7 @@ where
     while let Some(maybe_packet) = incoming.next().await {
         match maybe_packet {
             Ok(packet) => {
-                if let Some(event) = processor.process(packet, &incoming_pub_limit).await? {
-                    let message = Message::Client(client_id.clone(), event);
-                    broker.send(message).await?;
-                } else {
+                if processor.process(packet, &incoming_pub_limit).await? == Processed::Stop {
                     return Ok(());
                 }
             }
