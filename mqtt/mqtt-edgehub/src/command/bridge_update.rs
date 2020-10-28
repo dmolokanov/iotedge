@@ -15,9 +15,9 @@ pub struct BridgeUpdateCommand {
 }
 
 impl BridgeUpdateCommand {
-    pub fn new(controller_handle: &BridgeControllerHandle) -> Self {
+    pub fn new(controller_handle: BridgeControllerHandle) -> Self {
         Self {
-            controller_handle: controller_handle.clone(),
+            controller_handle: controller_handle,
         }
     }
 }

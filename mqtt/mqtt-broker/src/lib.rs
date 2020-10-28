@@ -33,7 +33,9 @@ pub mod proptest;
 use std::{
     any::Any,
     fmt::{Debug, Display, Formatter, Result as FmtResult},
+    future::Future,
     net::SocketAddr,
+    pin::Pin,
     sync::Arc,
 };
 
@@ -405,6 +407,28 @@ impl Debug for SystemEvent {
 pub enum Message {
     Client(ClientId, ClientEvent),
     System(SystemEvent),
+}
+
+#[async_trait::async_trait]
+pub trait Sidecar {
+    fn shutdown_handle(&self) -> SidecarShutdownHandle;
+
+    async fn run(self: Box<Self>);
+}
+
+pub struct SidecarShutdownHandle(Pin<Box<dyn Future<Output = ()>>>);
+
+impl SidecarShutdownHandle {
+    pub fn new<F>(shutdown: F) -> Self
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        Self(Box::pin(shutdown))
+    }
+
+    pub async fn shutdown(self) {
+        self.0.await
+    }
 }
 
 #[cfg(test)]

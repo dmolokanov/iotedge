@@ -1,61 +1,94 @@
-use futures_util::future;
-use tokio::task::JoinHandle;
+use std::future::Future;
 
-use tracing::{error, info};
+use anyhow::Result;
+use futures_util::{
+    future::{self, Either},
+    pin_mut,
+};
+use mqtt_broker::{BrokerHandle, BrokerSnapshot, Message, Sidecar, SystemEvent};
+
+use tracing::{debug, error};
 
 #[cfg(feature = "edgehub")]
 mod edgehub;
 
 #[cfg(feature = "edgehub")]
-pub use edgehub::{
-    broker, config, start_server, start_sidecars, SidecarError, SidecarShutdownHandle,
-};
+pub use edgehub::{add_sidecars, broker, config, start_server};
 
 #[cfg(all(not(feature = "edgehub"), feature = "generic"))]
 mod generic;
 
 #[cfg(all(not(feature = "edgehub"), feature = "generic"))]
-pub use generic::{
-    broker, config, start_server, start_sidecars, SidecarError, SidecarShutdownHandle,
-};
+pub use generic::{broker, config, start_server, start_sidecars, SidecarError};
 
-/// Wraps join handles for sidecar processes and exposes single future
-/// Exposed future will wait for any sidecar to complete, then shut down the rest
-/// Also exposes shutdown handle used to shut down all the sidecars
 pub struct SidecarManager {
-    join_handles: Vec<JoinHandle<()>>,
-    shutdown_handle: SidecarShutdownHandle,
+    sidecars: Vec<Box<dyn Sidecar>>,
 }
 
 impl SidecarManager {
-    #![allow(dead_code)] // needed because we have no sidecars for the generic feature
-    pub fn new(join_handles: Vec<JoinHandle<()>>, shutdown_handle: SidecarShutdownHandle) -> Self {
+    pub fn new() -> Self {
         Self {
-            join_handles,
-            shutdown_handle,
+            sidecars: Vec::new(),
         }
     }
 
-    pub async fn wait_for_shutdown(self) -> Result<(), SidecarError> {
-        let (sidecar_output, _, other_handles) = future::select_all(self.join_handles).await;
+    pub fn add_sidecar<S: Sidecar + 'static>(&mut self, sidecar: S) {
+        self.sidecars.push(Box::new(sidecar));
+    }
 
-        info!("A sidecar has stopped. Shutting down sidecars...");
-        if let Err(e) = sidecar_output {
-            error!(message = "failed waiting for sidecar shutdown", err = %e);
-        }
+    pub async fn run(
+        self,
+        mut broker_handle: BrokerHandle,
+        server: impl Future<Output = Result<BrokerSnapshot>>,
+    ) -> Result<BrokerSnapshot> {
+        let (mut shutdowns, sidecars): (Vec<_>, Vec<_>) = self
+            .sidecars
+            .into_iter()
+            .map(|sidecar| (sidecar.shutdown_handle(), tokio::spawn(sidecar.run())))
+            .unzip();
 
-        self.shutdown_handle.shutdown().await?;
+        pin_mut!(server);
 
-        for handle in other_handles {
-            if let Err(e) = handle.await {
-                error!(message = "failed waiting for sidecar shutdown", err = %e);
+        let state = match future::select(server, future::select_all(sidecars)).await {
+            // server exited first
+            Either::Left((snapshot, sidecars)) => {
+                // send shutdown event to each sidecar
+                let shutdowns = shutdowns.into_iter().map(|handle| handle.shutdown());
+                future::join_all(shutdowns).await;
+
+                // awaits for at least one to finish
+                let (_res, stopped, mut sidecars) = sidecars.await;
+                sidecars.remove(stopped);
+
+                // wait for the rest to exit
+                future::join_all(sidecars).await;
+
+                snapshot?
             }
-        }
+            // one of sidecars exited first
+            Either::Right(((res, stopped, sidecars), server)) => {
+                // signal server
+                broker_handle.send(Message::System(SystemEvent::Shutdown))?;
+                let snapshot = server.await;
 
-        Ok(())
-    }
+                shutdowns.remove(stopped);
 
-    pub fn shutdown_handle(&self) -> SidecarShutdownHandle {
-        self.shutdown_handle.clone()
+                debug!("a sidecar has stopped. shutting down all sidecars...");
+                if let Err(e) = res {
+                    error!(message = "failed waiting for sidecar shutdown", error = %e);
+                }
+
+                // send shutdown event to each sidecar
+                let shutdowns = shutdowns.into_iter().map(|handle| handle.shutdown());
+                future::join_all(shutdowns).await;
+
+                // wait for the rest to exit
+                future::join_all(sidecars).await;
+
+                snapshot?
+            }
+        };
+
+        Ok(state)
     }
 }

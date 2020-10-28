@@ -1,6 +1,7 @@
 use std::{collections::HashMap, collections::HashSet, error::Error as StdError, time::Duration};
 
 use futures_util::future::BoxFuture;
+use mqtt_broker::{Sidecar, SidecarShutdownHandle};
 use tokio::{net::TcpStream, stream::StreamExt};
 use tracing::{debug, error, info};
 
@@ -100,7 +101,24 @@ impl CommandHandler {
         })
     }
 
-    pub async fn run(mut self) {
+    async fn handle_event(&mut self, event: Event) -> Result<(), Box<dyn StdError>> {
+        if let Event::Publication(publication) = event {
+            if let Some(command) = self.commands.get_mut(&publication.topic_name) {
+                command.handle(&publication)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Sidecar for CommandHandler {
+    fn shutdown_handle(&self) -> SidecarShutdownHandle {
+        let handle = self.shutdown_handle();
+        SidecarShutdownHandle::new(handle.shutdown())
+    }
+
+    async fn run(mut self: Box<Self>) {
         info!("starting command handler...");
 
         loop {
@@ -121,15 +139,6 @@ impl CommandHandler {
         }
 
         debug!("command handler stopped");
-    }
-
-    async fn handle_event(&mut self, event: Event) -> Result<(), Box<dyn StdError>> {
-        if let Event::Publication(publication) = event {
-            if let Some(command) = self.commands.get_mut(&publication.topic_name) {
-                command.handle(&publication)?;
-            }
-        }
-        Ok(())
     }
 }
 
