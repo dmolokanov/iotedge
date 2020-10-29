@@ -2,6 +2,7 @@ mod bridges;
 
 use bridges::Bridges;
 
+use async_trait::async_trait;
 use futures_util::{
     future::{self, Either},
     stream::Fuse,
@@ -10,7 +11,7 @@ use futures_util::{
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, warn};
 
-use mqtt_broker::{Sidecar, SidecarShutdownHandle};
+use mqtt_broker::sidecar::{Sidecar, SidecarShutdownHandle, SidecarShutdownHandleError};
 
 use crate::{
     bridge::{Bridge, BridgeError},
@@ -53,11 +54,11 @@ impl BridgeController {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl Sidecar for BridgeController {
-    fn shutdown_handle(&self) -> SidecarShutdownHandle {
+    fn shutdown_handle(&self) -> Result<SidecarShutdownHandle, SidecarShutdownHandleError> {
         let handle = self.handle.clone();
-        SidecarShutdownHandle::new(async { handle.shutdown() })
+        Ok(SidecarShutdownHandle::new(async { handle.shutdown() }))
     }
 
     async fn run(mut self: Box<Self>) {
@@ -75,7 +76,7 @@ impl Sidecar for BridgeController {
                 }
             }
         } else {
-            info!("No upstream settings detected.")
+            info!("no upstream settings detected.")
         }
 
         let mut no_bridges = bridges.is_terminated();

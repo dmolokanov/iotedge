@@ -31,7 +31,7 @@ use mqtt_edgehub::{
     settings::{ListenerConfig, Settings},
 };
 
-use super::SidecarManager;
+use super::Bootstrap;
 
 const DEVICE_ID_ENV: &str = "IOTEDGE_DEVICEID";
 
@@ -139,8 +139,8 @@ where
     Ok(state)
 }
 
-pub async fn add_sidecars(
-    sidecars: &mut SidecarManager,
+pub fn add_sidecars(
+    bootstrap: &mut Bootstrap,
     broker_handle: BrokerHandle,
     listener_settings: ListenerConfig,
 ) -> Result<()> {
@@ -152,24 +152,16 @@ pub async fn add_sidecars(
         BridgeController::new(system_address.clone(), device_id.to_owned(), settings);
     let bridge_controller_handle = bridge_controller.handle();
 
-    sidecars.add_sidecar(bridge_controller);
+    bootstrap.add_sidecar(bridge_controller);
 
     let mut command_handler = CommandHandler::new(system_address, &device_id);
     command_handler.add_command(DisconnectCommand::new(&broker_handle));
     command_handler.add_command(AuthorizedIdentitiesCommand::new(&broker_handle));
     command_handler.add_command(PolicyUpdateCommand::new(&broker_handle));
     command_handler.add_command(BridgeUpdateCommand::new(bridge_controller_handle));
-    command_handler.init().await?;
 
-    sidecars.add_sidecar(command_handler);
-    // let _command_handler_shutdown = command_handler.shutdown_handle()?;
-    // let _command_handler_join_handle = tokio::spawn(command_handler.run());
+    bootstrap.add_sidecar(command_handler);
 
-    // let join_handles = vec![command_handler_join_handle, bridge_controller_join_handle];
-    // let shutdown_handle = SidecarShutdownHandle::new(command_handler_shutdown);
-
-    // Ok(Some(SidecarManager::new(join_handles, shutdown_handle)))
-    // todo!()
     Ok(())
 }
 
@@ -208,7 +200,7 @@ pub const CERTIFICATE_VALIDITY_DAYS: i64 = 90;
 async fn download_server_certificate() -> Result<ServerCertificate> {
     let uri = env::var(WORKLOAD_URI).context(WORKLOAD_URI)?;
     let hostname = env::var(EDGE_DEVICE_HOST_NAME).context(EDGE_DEVICE_HOST_NAME)?;
-    let module_id = env::var(MODULE_ID).context(MODULE_GENERATION_ID)?;
+    let module_id = env::var(MODULE_ID).context(MODULE_ID)?;
     let generation_id = env::var(MODULE_GENERATION_ID).context(MODULE_GENERATION_ID)?;
     let expiration = Utc::now() + Duration::days(CERTIFICATE_VALIDITY_DAYS);
 

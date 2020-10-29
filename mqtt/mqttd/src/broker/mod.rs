@@ -11,7 +11,7 @@ use mqtt_broker::{BrokerReady, FilePersistor, Persist, VersionedFileFormat};
 
 use crate::broker::snapshot::start_snapshotter;
 
-use self::bootstrap::SidecarManager;
+use self::bootstrap::Bootstrap;
 
 pub async fn run<P>(config_path: Option<P>) -> Result<()>
 where
@@ -41,9 +41,9 @@ where
     let shutdown_signal = shutdown::shutdown();
     let server = bootstrap::start_server(settings, broker, shutdown_signal, broker_ready);
 
-    let mut sidecars = SidecarManager::new();
-    bootstrap::add_sidecars(&mut sidecars, broker_handle.clone(), listener_settings).await?;
-    let state = sidecars.run(broker_handle, server).await?;
+    let mut bootstrap = Bootstrap::new();
+    bootstrap::add_sidecars(&mut bootstrap, broker_handle.clone(), listener_settings)?;
+    let state = bootstrap.run(broker_handle, server).await?;
 
     snapshotter_shutdown_handle.shutdown().await?;
     let mut persistor = snapshotter_join_handle.await?;
