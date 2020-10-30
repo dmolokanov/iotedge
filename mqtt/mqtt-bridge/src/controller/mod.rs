@@ -129,7 +129,7 @@ impl Sidecar for BridgeController {
             }
         }
 
-        info!("finished bridge controller");
+        info!("bridge controller stopped");
     }
 }
 

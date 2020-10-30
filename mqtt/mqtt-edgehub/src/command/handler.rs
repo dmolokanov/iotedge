@@ -194,7 +194,10 @@ async fn subscribe(
         }
     }
 
-    error!("command handler failed to subscribe to disconnect topic");
+    error!(
+        "command handler failed to subscribe to following topics {:?}",
+        subacks
+    );
     Err(CommandHandlerError::MissingSubacks(
         subacks.into_iter().collect::<Vec<_>>(),
     ))
